@@ -20,36 +20,43 @@ namespace DependencyMapper
         public ImmutableArray<Edge> Edges { get; }
         public ImmutableArray<Node> Nodes { get; }
 
-        private static IEnumerable<Assembly> GetAssembliesInSameDir(Assembly assembly)
+        private static IEnumerable<Assembly> GetAssembliesInSameDir(string fileName)
         {
-            string path = Path.GetDirectoryName(assembly.Location);
+            string path = Path.GetDirectoryName(fileName);
 
             foreach (string dll in Directory.GetFiles(path, "*.dll"))
                 yield return Assembly.LoadFrom(dll);
         }
 
-        private static Node Load(Assembly assembly, Dictionary<string, Node> nodes, List<Edge> edges)
+        private static void Load(Node node, Dictionary<AssemblyName, Node> nodes, List<Edge> edges, Func<AssemblyName, Node> nodeFactory)
         {
-            var node = new Node(assembly.GetName().Name);
-            nodes.Add(assembly.GetName().Name, node);
-
-            foreach (var dependencyName in assembly.GetReferencedAssemblies())
+            try
             {
-                if (!nodes.TryGetValue(dependencyName.Name, out Node dependency))
+                var assembly = Assembly.Load(node.Name);
+                foreach (var dependencyName in assembly.GetReferencedAssemblies())
                 {
-                    var dependencyAssembly = Assembly.Load(dependencyName);
-                    dependency = Load(dependencyAssembly, nodes, edges);
+                    if (!nodes.TryGetValue(dependencyName, out Node dependency))
+                    {
+                        dependency = nodeFactory(dependencyName);
+                        nodes[dependencyName] = dependency;
+                    }
+
+                    dependency.Level = Math.Max(dependency.Level, node.Level + 1);
+
+                    edges.Add(new Edge(node, dependency));
                 }
-
-                edges.Add(new Edge(node, dependency));
             }
-
-            return node;
+            catch (Exception ex)
+            {
+                node.Error = ex;
+            }
         }
 
-        public static DependencyMap CreateFrom(Assembly assembly)
+        public static DependencyMap CreateFrom(string filename)
         {
-            var ass = GetAssembliesInSameDir(assembly).ToImmutableDictionary(x => x.FullName);
+            var assemblyName = AssemblyName.GetAssemblyName(filename);
+
+            var ass = GetAssembliesInSameDir(filename).ToImmutableDictionary(x => x.FullName);
 
             AppDomain currentDomain = AppDomain.CurrentDomain;
             currentDomain.AssemblyResolve += new ResolveEventHandler((o, a) =>
@@ -58,25 +65,62 @@ namespace DependencyMapper
             });
 
 
+            //var nodes = new[]
+            //{
+            //    new Node("System.Runtime.CompilerServices.Unsafe")
+            //}.ToDictionary(x => x.Name);
 
 
-
-
-
-
-            var nodes = new[]
-            {
-                new Node("System.Runtime.CompilerServices.Unsafe")
-            }.ToDictionary(x => x.Name);
-
+            var nodes = new Dictionary<AssemblyName, Node>(new AssemblyNameComparer());
             var edges = new List<Edge>();
+            var unloaded = new Queue<Node>();
 
+            var node = new Node(assemblyName);
+            nodes.Add(node.Name, node);
+            unloaded.Enqueue(node);
 
-            Load(assembly, nodes, edges);
+            while (unloaded.Count > 0)
+            {
+                var n = unloaded.Dequeue();
+                Load(n, nodes, edges, an =>
+                {
+                    var nn = new Node(an);
+                    unloaded.Enqueue(nn);
+                    return nn;
+                });
+            }
 
             return new DependencyMap(nodes.Values.ToImmutableArray(), edges.ToImmutableArray());
         }
+
+        private class AssemblyNameComparer : IEqualityComparer<AssemblyName>
+        {
+            public int Compare(AssemblyName x, AssemblyName y)
+            {
+                var c = x.Name.CompareTo(y.Name);
+
+                if (c == 0)
+                {
+                    c = x.Version.CompareTo(y.Version);
+                }
+
+                return c;
+            }
+
+            public bool Equals(AssemblyName x, AssemblyName y)
+            {
+                return x.Name.Equals(y.Name) && x.Version.Equals(y.Version);
+            }
+
+            public int GetHashCode(AssemblyName obj)
+            {
+                return obj.Name.GetHashCode() + obj.Version.GetHashCode();
+            }
+        }
     }
+
+
+
 
     public class Edge
     {
@@ -92,12 +136,15 @@ namespace DependencyMapper
 
     public class Node
     {
-        public Node(string name)
+        public Node(AssemblyName name)
         {
             Name = name;
         }
+        public Exception Error { get; set; }
 
-        public string Name { get; }
+        public int Level { get; set; } = 0;
+
+        public AssemblyName Name { get; }
 
         public override bool Equals(object obj)
         {
@@ -107,7 +154,7 @@ namespace DependencyMapper
 
         public override int GetHashCode()
         {
-            return 558414575 + EqualityComparer<string>.Default.GetHashCode(Name);
+            return 558414575 + Name.GetHashCode();
         }
     }
 }

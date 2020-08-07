@@ -8,11 +8,11 @@
         Title="MainWindow" Height="450" Width="800">
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="300" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
         <ScrollViewer VerticalScrollBarVisibility="Visible">
-            <ListBox ItemsSource="{Binding Map.Nodes, Mode=OneTime}">
+            <ListBox ItemsSource="{Binding Nodes, Mode=OneTime}" SelectedItem="{Binding SelectedNode, Mode=TwoWay}">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <TextBlock Text="{Binding Name}" />
@@ -20,7 +20,10 @@
                 </ListBox.ItemTemplate>
             </ListBox>
         </ScrollViewer>
-        <ContentControl Grid.Column="1" Content="{Binding VisualMap}" />
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Visible" HorizontalScrollBarVisibility="Visible">
+            <ContentControl Content="{Binding VisualMap}" />
+        </ScrollViewer>
+        
 
     </Grid>
 </Window>
